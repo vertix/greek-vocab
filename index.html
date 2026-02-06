@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Greek Vocabulary Learning App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Greek Vocabulary Learning</h1>
+            <div class="header-buttons">
+                <button id="loadFileBtn" class="btn btn-primary">Start Learning</button>
+                <button id="editWordsBtn" class="btn btn-secondary" disabled>Edit Words</button>
+                <button id="editTranslationsBtn" class="btn btn-secondary" disabled>Edit Translations</button>
+                <button id="manageProgressBtn" class="btn btn-secondary" disabled>Manage Progress</button>
+            </div>
+        </header>
+
+        <main id="mainContent">
+            <div id="setupScreen" class="setup-screen">
+                <h2>Добро пожаловать! / Welcome!</h2>
+                <p>Чтобы начать / To get started:</p>
+                <ol>
+                    <li>Нажмите "Start Learning" / Click "Start Learning"</li>
+                    <li>Начинайте учить! / Start learning!</li>
+                </ol>
+                <p style="margin-top: 20px; font-size: 14px; color: #6b7280;">
+                    📝 Все переводы уже готовы / All translations are ready (162 words)<br>
+                    ✏️ Используйте "Edit Translations" для изменения / Use "Edit Translations" to modify
+                </p>
+            </div>
+
+            <div id="learningScreen" class="learning-screen hidden">
+                <div id="wordDisplay" class="word-display">
+                    <div id="russianWord" class="russian-word"></div>
+                    <div id="greekWord" class="greek-word hidden"></div>
+                </div>
+
+                <div id="actionButtons" class="action-buttons hidden">
+                    <button id="wrongBtn" class="btn btn-wrong">✗ Got it wrong</button>
+                    <button id="rightBtn" class="btn btn-right">✓ Got it right</button>
+                </div>
+
+                <div id="statistics" class="statistics">
+                    <div class="stat">
+                        <span class="stat-label">Total Words:</span>
+                        <span id="remainingCount" class="stat-value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Well Known:</span>
+                        <span id="learnedCount" class="stat-value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Session Accuracy:</span>
+                        <span id="accuracyCount" class="stat-value">0%</span>
+                    </div>
+                </div>
+
+                <div id="completionScreen" class="completion-screen hidden">
+                    <h2>🎉 Congratulations!</h2>
+                    <p>You've learned all the words!</p>
+                    <button id="newSessionBtn" class="btn btn-primary">Start New Session</button>
+                </div>
+            </div>
+
+            <div id="loadingScreen" class="loading-screen hidden">
+                <div class="spinner"></div>
+                <p id="loadingMessage">Loading...</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Edit Words Modal -->
+    <div id="editWordsModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Words</h2>
+                <button class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="help-text">Enter Greek words (one per line):</p>
+                <textarea id="wordsTextarea" rows="15"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button id="saveWordsBtn" class="btn btn-primary">Save</button>
+                <button class="btn btn-secondary close-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Translations Modal -->
+    <div id="editTranslationsModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Translations</h2>
+                <button class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="help-text">Edit translations:</p>
+                <div id="translationsTable" class="translations-table"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="saveTranslationsBtn" class="btn btn-primary">Save</button>
+                <button class="btn btn-secondary close-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Progress Modal -->
+    <div id="manageProgressModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Progress</h2>
+                <button class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="help-text">
+                    Well-known words: <strong id="learnedWordsCount">0</strong> (weight &lt; 0.1)<br>
+                    <span style="font-size: 12px; color: #6b7280;">
+                        Word weights are saved in your browser's localStorage<br>
+                        Default weight: 1.0<br>
+                        ✓ Correct: weight ÷ 2 (appears less frequently)<br>
+                        ✗ Wrong: weight unchanged (keeps same frequency)
+                    </span>
+                </p>
+                <div style="margin-top: 20px;">
+                    <button id="exportLearnedBtn" class="btn btn-primary">📥 Export Weights</button>
+                    <button id="resetProgressBtn" class="btn btn-wrong" style="margin-top: 10px;">🗑️ Reset All Weights</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary close-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        // Simplified version - loads files via HTTP (no file picker needed)
+        class VocabApp {
+            constructor() {
+                this.DEFAULT_WEIGHT = 1.0;
+
+                this.data = {
+                    wordWeights: new Map(), // Map<greek, weight>
+                    translations: new Map(),
+                    currentWord: null,
+                    previousWord: null,
+                    sessionStats: {
+                        correct: 0,
+                        wrong: 0,
+                        total: 0
+                    }
+                };
+
+                this.state = {
+                    answerRevealed: false
+                };
+
+                this.init();
+            }
+
+            async init() {
+                this.setupEventListeners();
+                this.setupKeyboardShortcuts();
+            }
+
+            setupEventListeners() {
+                document.getElementById('loadFileBtn').addEventListener('click', () => this.loadFiles());
+                document.getElementById('editWordsBtn').addEventListener('click', () => this.openEditWordsModal());
+                document.getElementById('saveWordsBtn').addEventListener('click', () => this.saveWords());
+                document.getElementById('editTranslationsBtn').addEventListener('click', () => this.openEditTranslationsModal());
+                document.getElementById('saveTranslationsBtn').addEventListener('click', () => this.saveTranslations());
+                document.getElementById('russianWord').addEventListener('click', () => this.revealAnswer());
+                document.getElementById('rightBtn').addEventListener('click', () => this.markCorrect());
+                document.getElementById('wrongBtn').addEventListener('click', () => this.markWrong());
+                document.getElementById('newSessionBtn').addEventListener('click', () => this.startNewSession());
+                document.getElementById('manageProgressBtn').addEventListener('click', () => this.openManageProgressModal());
+                document.getElementById('exportLearnedBtn').addEventListener('click', () => this.exportLearnedWords());
+                document.getElementById('resetProgressBtn').addEventListener('click', () => this.resetProgress());
+
+                // Modal close buttons
+                document.querySelectorAll('.close-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const modal = e.target.closest('.modal');
+                        if (modal) {
+                            modal.classList.add('hidden');
+                        }
+                    });
+                });
+            }
+
+            setupKeyboardShortcuts() {
+                document.addEventListener('keydown', (e) => {
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                        return;
+                    }
+
+                    switch(e.key) {
+                        case ' ':
+                            e.preventDefault();
+                            this.revealAnswer();
+                            break;
+                        case '1':
+                        case 'ArrowRight':
+                            if (this.state.answerRevealed) {
+                                this.markCorrect();
+                            }
+                            break;
+                        case '2':
+                        case 'ArrowLeft':
+                            if (this.state.answerRevealed) {
+                                this.markWrong();
+                            }
+                            break;
+                        case 'e':
+                        case 'E':
+                            if (!document.getElementById('editWordsBtn').disabled) {
+                                this.openEditWordsModal();
+                            }
+                            break;
+                    }
+                });
+            }
+
+            async loadFiles() {
+                try {
+                    this.showLoading('Loading files...');
+
+                    // Load translations.tsv
+                    const translationsResponse = await fetch('translations.tsv');
+                    const translationsContent = await translationsResponse.text();
+                    this.data.translations = this.parseTSV(translationsContent);
+
+                    // Load word weights from localStorage
+                    this.data.wordWeights = this.loadWordWeights();
+
+                    // Initialize weights for any new words not in localStorage
+                    for (const greekWord of this.data.translations.keys()) {
+                        if (!this.data.wordWeights.has(greekWord)) {
+                            this.data.wordWeights.set(greekWord, this.DEFAULT_WEIGHT);
+                        }
+                    }
+
+                    this.hideLoading();
+                    this.showLearningScreen();
+                    this.updateStatistics();
+                    this.showNextWord();
+
+                    document.getElementById('editWordsBtn').disabled = false;
+                    document.getElementById('editTranslationsBtn').disabled = false;
+                    document.getElementById('manageProgressBtn').disabled = false;
+
+                    console.log('Files loaded successfully!');
+                    console.log('Total words:', this.data.wordWeights.size);
+                    console.log('Translations:', this.data.translations.size);
+
+                } catch (e) {
+                    this.hideLoading();
+                    console.error('Error loading files:', e);
+                    alert('Error loading files: ' + e.message + '\n\nMake sure to run this app from http://localhost:8765');
+                }
+            }
+
+            parseTSV(content) {
+                const map = new Map();
+                const lines = content.split('\n');
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+
+                    const parts = line.split('\t');
+                    if (parts.length >= 2) {
+                        const greek = parts[0].trim();
+                        const russian = parts[1].trim();
+                        if (greek && russian) {
+                            map.set(greek, russian);
+                        }
+                    }
+                }
+
+                return map;
+            }
+
+            loadWordWeights() {
+                try {
+                    const stored = localStorage.getItem('greekVocab_weights');
+                    if (!stored) {
+                        return new Map();
+                    }
+
+                    const parsed = JSON.parse(stored);
+                    return new Map(parsed);
+                } catch (e) {
+                    console.error('Error loading word weights from localStorage:', e);
+                    return new Map();
+                }
+            }
+
+            saveWordWeights() {
+                try {
+                    const data = Array.from(this.data.wordWeights.entries());
+                    localStorage.setItem('greekVocab_weights', JSON.stringify(data));
+                } catch (e) {
+                    console.error('Error saving word weights to localStorage:', e);
+                }
+            }
+
+            getRandomWord() {
+                if (this.data.wordWeights.size === 0) {
+                    return null;
+                }
+
+                // Weighted random selection
+                let totalWeight = 0;
+                for (const weight of this.data.wordWeights.values()) {
+                    totalWeight += weight;
+                }
+
+                let random = Math.random() * totalWeight;
+
+                for (const [word, weight] of this.data.wordWeights.entries()) {
+                    random -= weight;
+                    if (random <= 0) {
+                        return word;
+                    }
+                }
+
+                // Fallback (shouldn't reach here)
+                return Array.from(this.data.wordWeights.keys())[0];
+            }
+
+            getRandomWordAvoidingPrevious() {
+                if (this.data.wordWeights.size === 0) {
+                    return null;
+                }
+
+                if (this.data.wordWeights.size === 1) {
+                    return Array.from(this.data.wordWeights.keys())[0];
+                }
+
+                let word;
+                let attempts = 0;
+                do {
+                    word = this.getRandomWord();
+                    attempts++;
+                } while (word === this.data.previousWord && attempts < 10);
+
+                return word;
+            }
+
+            showNextWord() {
+                const greekWord = this.getRandomWordAvoidingPrevious();
+                if (!greekWord) {
+                    console.error('No words available');
+                    return;
+                }
+
+                this.data.currentWord = greekWord;
+                this.state.answerRevealed = false;
+
+                const russianWord = this.data.translations.get(greekWord);
+
+                if (!russianWord) {
+                    console.error('Translation not found for:', greekWord);
+                    alert('Translation missing for: ' + greekWord);
+                    return;
+                }
+
+                document.getElementById('russianWord').textContent = russianWord;
+                document.getElementById('greekWord').textContent = '';
+                document.getElementById('greekWord').classList.add('hidden');
+                document.getElementById('actionButtons').classList.add('hidden');
+            }
+
+            revealAnswer() {
+                if (this.state.answerRevealed || !this.data.currentWord) {
+                    return;
+                }
+
+                this.state.answerRevealed = true;
+                document.getElementById('greekWord').textContent = this.data.currentWord;
+                document.getElementById('greekWord').classList.remove('hidden');
+                document.getElementById('actionButtons').classList.remove('hidden');
+            }
+
+            async markCorrect() {
+                if (!this.state.answerRevealed || !this.data.currentWord) {
+                    return;
+                }
+
+                this.data.sessionStats.correct++;
+                this.data.sessionStats.total++;
+
+                const greekWord = this.data.currentWord;
+
+                // Halve the weight (word appears less frequently)
+                const currentWeight = this.data.wordWeights.get(greekWord) || this.DEFAULT_WEIGHT;
+                this.data.wordWeights.set(greekWord, currentWeight / 2);
+
+                // Save to localStorage
+                this.saveWordWeights();
+
+                this.data.previousWord = this.data.currentWord;
+                this.updateStatistics();
+
+                await this.sleep(300);
+                this.showNextWord();
+            }
+
+            async markWrong() {
+                if (!this.state.answerRevealed || !this.data.currentWord) {
+                    return;
+                }
+
+                this.data.sessionStats.wrong++;
+                this.data.sessionStats.total++;
+
+                // Keep weight as is (no change when wrong)
+
+                this.data.previousWord = this.data.currentWord;
+                this.updateStatistics();
+
+                await this.sleep(300);
+                this.showNextWord();
+            }
+
+            openEditWordsModal() {
+                alert('To add or remove words, edit the translations.tsv file and reload the page.');
+            }
+
+            async saveWords() {
+                // Not used anymore
+            }
+
+            openEditTranslationsModal() {
+                const modal = document.getElementById('editTranslationsModal');
+                const container = document.getElementById('translationsTable');
+
+                container.innerHTML = '';
+
+                for (const [greek, russian] of this.data.translations) {
+                    const row = document.createElement('div');
+                    row.className = 'translation-row';
+
+                    const greekSpan = document.createElement('div');
+                    greekSpan.className = 'greek-text';
+                    greekSpan.textContent = greek;
+
+                    const russianInput = document.createElement('input');
+                    russianInput.type = 'text';
+                    russianInput.value = russian;
+                    russianInput.dataset.greek = greek;
+
+                    row.appendChild(greekSpan);
+                    row.appendChild(russianInput);
+                    container.appendChild(row);
+                }
+
+                modal.classList.remove('hidden');
+            }
+
+            async saveTranslations() {
+                const inputs = document.querySelectorAll('#translationsTable input');
+
+                for (const input of inputs) {
+                    const greek = input.dataset.greek;
+                    const russian = input.value.trim();
+
+                    if (russian) {
+                        this.data.translations.set(greek, russian);
+                    }
+                }
+
+                document.getElementById('editTranslationsModal').classList.add('hidden');
+
+                alert('Translations updated in memory. To persist changes, you need to edit translations.tsv file manually.');
+
+                if (this.data.currentWord) {
+                    const russianWord = this.data.translations.get(this.data.currentWord);
+                    document.getElementById('russianWord').textContent = russianWord;
+                }
+            }
+
+            openManageProgressModal() {
+                const modal = document.getElementById('manageProgressModal');
+                const count = document.getElementById('learnedWordsCount');
+
+                // Count well-known words (weight < 0.1)
+                let wellKnownCount = 0;
+                for (const weight of this.data.wordWeights.values()) {
+                    if (weight < 0.1) {
+                        wellKnownCount++;
+                    }
+                }
+
+                count.textContent = wellKnownCount;
+                modal.classList.remove('hidden');
+            }
+
+            exportLearnedWords() {
+                if (this.data.wordWeights.size === 0) {
+                    alert('No word weights to export yet!');
+                    return;
+                }
+
+                // Create TSV content with weights
+                let tsvContent = 'Greek\tWeight\n';
+                const sortedWords = Array.from(this.data.wordWeights.entries())
+                    .sort((a, b) => a[1] - b[1]); // Sort by weight (lowest first)
+
+                for (const [greek, weight] of sortedWords) {
+                    tsvContent += `${greek}\t${weight}\n`;
+                }
+
+                // Create download
+                const blob = new Blob([tsvContent], { type: 'text/tab-separated-values;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'word_weights.tsv';
+                link.click();
+
+                alert(`Exported ${this.data.wordWeights.size} words with their weights to word_weights.tsv`);
+            }
+
+            resetProgress() {
+                if (!confirm('Are you sure you want to reset all progress? This will reset all word weights to default.')) {
+                    return;
+                }
+
+                // Clear localStorage
+                localStorage.removeItem('greekVocab_weights');
+
+                // Reset all weights to default
+                for (const greek of this.data.wordWeights.keys()) {
+                    this.data.wordWeights.set(greek, this.DEFAULT_WEIGHT);
+                }
+
+                // Save to localStorage
+                this.saveWordWeights();
+
+                // Update UI
+                this.updateStatistics();
+                document.getElementById('manageProgressModal').classList.add('hidden');
+
+                alert('Progress reset successfully! All word weights are now default.');
+
+                // Restart if currently learning
+                if (!document.getElementById('learningScreen').classList.contains('hidden')) {
+                    this.showNextWord();
+                }
+            }
+
+            updateStatistics() {
+                // Count total words
+                document.getElementById('remainingCount').textContent = this.data.wordWeights.size;
+
+                // Count well-known words (weight < 0.1)
+                let wellKnownCount = 0;
+                for (const weight of this.data.wordWeights.values()) {
+                    if (weight < 0.1) {
+                        wellKnownCount++;
+                    }
+                }
+                document.getElementById('learnedCount').textContent = wellKnownCount;
+
+                // Session accuracy
+                const total = this.data.sessionStats.total;
+                const accuracy = total > 0
+                    ? Math.round((this.data.sessionStats.correct / total) * 100)
+                    : 0;
+                document.getElementById('accuracyCount').textContent = accuracy + '%';
+            }
+
+            showLearningScreen() {
+                document.getElementById('setupScreen').classList.add('hidden');
+                document.getElementById('learningScreen').classList.remove('hidden');
+                document.getElementById('loadingScreen').classList.add('hidden');
+                document.getElementById('completionScreen').classList.add('hidden');
+            }
+
+            showCompletion() {
+                document.getElementById('setupScreen').classList.add('hidden');
+                document.getElementById('learningScreen').classList.add('hidden');
+                document.getElementById('loadingScreen').classList.add('hidden');
+                document.getElementById('completionScreen').classList.remove('hidden');
+            }
+
+            showLoading(message) {
+                document.getElementById('loadingMessage').textContent = message;
+                document.getElementById('setupScreen').classList.add('hidden');
+                document.getElementById('learningScreen').classList.add('hidden');
+                document.getElementById('loadingScreen').classList.remove('hidden');
+            }
+
+            hideLoading() {
+                document.getElementById('loadingScreen').classList.add('hidden');
+                document.getElementById('learningScreen').classList.remove('hidden');
+            }
+
+            startNewSession() {
+                location.reload();
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        // Initialize app
+        let app;
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                app = new VocabApp();
+            });
+        } else {
+            app = new VocabApp();
+        }
+    </script>
+</body>
+</html>
