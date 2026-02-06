@@ -234,8 +234,8 @@
                     const translationsContent = await translationsResponse.text();
                     this.data.translations = this.parseTSV(translationsContent);
 
-                    // Load word weights from localStorage
-                    this.data.wordWeights = this.loadWordWeights();
+                    // Load word weights from cloud/localStorage
+                    this.data.wordWeights = await this.loadWordWeights();
 
                     // Initialize weights for any new words not in localStorage
                     for (const greekWord of this.data.translations.keys()) {
@@ -284,7 +284,24 @@
                 return map;
             }
 
-            loadWordWeights() {
+            async loadWordWeights() {
+                // Try to load from cloud first
+                try {
+                    const response = await fetch('/api/weights');
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.length > 0) {
+                            // Save to localStorage as cache
+                            localStorage.setItem('greekVocab_weights', JSON.stringify(data));
+                            console.log('Loaded weights from cloud:', data.length);
+                            return new Map(data);
+                        }
+                    }
+                } catch (e) {
+                    console.log('Cloud sync unavailable, using localStorage');
+                }
+
+                // Fall back to localStorage
                 try {
                     const stored = localStorage.getItem('greekVocab_weights');
                     if (!stored) {
@@ -303,6 +320,15 @@
                 try {
                     const data = Array.from(this.data.wordWeights.entries());
                     localStorage.setItem('greekVocab_weights', JSON.stringify(data));
+
+                    // Sync to cloud (fire and forget)
+                    fetch('/api/weights', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data),
+                    }).then(r => {
+                        if (r.ok) console.log('Synced to cloud');
+                    }).catch(e => console.log('Cloud sync failed:', e));
                 } catch (e) {
                     console.error('Error saving word weights to localStorage:', e);
                 }
