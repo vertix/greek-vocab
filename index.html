@@ -11,6 +11,7 @@
         <header>
             <h1>Greek Vocabulary Learning</h1>
             <div class="header-buttons">
+                <select id="setSelector" class="set-selector" title="Word set to practice"></select>
                 <button id="loadFileBtn" class="btn btn-primary">Start Learning</button>
                 <button id="editWordsBtn" class="btn btn-secondary" disabled>Edit Words</button>
                 <button id="editTranslationsBtn" class="btn btn-secondary" disabled>Edit Translations</button>
@@ -23,12 +24,13 @@
                 <h2>Добро пожаловать! / Welcome!</h2>
                 <p>Чтобы начать / To get started:</p>
                 <ol>
+                    <li>Выберите набор слов / Pick a word set (dropdown above)</li>
                     <li>Нажмите "Start Learning" / Click "Start Learning"</li>
                     <li>Начинайте учить! / Start learning!</li>
                 </ol>
                 <p style="margin-top: 20px; font-size: 14px; color: #6b7280;">
-                    📝 Все переводы уже готовы / All translations are ready (162 words)<br>
-                    ✏️ Используйте "Edit Translations" для изменения / Use "Edit Translations" to modify
+                    📚 Каждый набор хранит свой прогресс отдельно<br>
+                    Each set keeps its own progress
                 </p>
             </div>
 
@@ -142,6 +144,10 @@
         class VocabApp {
             constructor() {
                 this.DEFAULT_WEIGHT = 1.0;
+                this.CURRENT_SET_KEY = 'greekVocab_currentSet';
+
+                this.sets = [];          // [{id, name, file}] from sets.json
+                this.currentSet = null;  // the active set object
 
                 this.data = {
                     wordWeights: new Map(), // Map<greek, weight>
@@ -165,10 +171,43 @@
             async init() {
                 this.setupEventListeners();
                 this.setupKeyboardShortcuts();
+                await this.loadSetsManifest();
+            }
+
+            // Load the list of available word sets and fill the dropdown
+            async loadSetsManifest() {
+                const selector = document.getElementById('setSelector');
+                try {
+                    const response = await fetch('sets.json');
+                    this.sets = await response.json();
+                } catch (e) {
+                    console.error('Could not load sets.json, falling back to a single set:', e);
+                    this.sets = [{ id: 'all', name: 'All words', file: 'translations.tsv' }];
+                }
+
+                selector.innerHTML = '';
+                for (const set of this.sets) {
+                    const option = document.createElement('option');
+                    option.value = set.id;
+                    option.textContent = set.name;
+                    selector.appendChild(option);
+                }
+
+                // Restore the previously chosen set, if any
+                const savedId = localStorage.getItem(this.CURRENT_SET_KEY);
+                const initial = this.sets.find(s => s.id === savedId) || this.sets[0];
+                this.currentSet = initial;
+                selector.value = initial.id;
+            }
+
+            // localStorage key holding this set's word weights (per-set progress)
+            weightsStorageKey(setId) {
+                return `greekVocab_weights_${setId}`;
             }
 
             setupEventListeners() {
                 document.getElementById('loadFileBtn').addEventListener('click', () => this.loadFiles());
+                document.getElementById('setSelector').addEventListener('change', (e) => this.switchSet(e.target.value));
                 document.getElementById('editWordsBtn').addEventListener('click', () => this.openEditWordsModal());
                 document.getElementById('saveWordsBtn').addEventListener('click', () => this.saveWords());
                 document.getElementById('editTranslationsBtn').addEventListener('click', () => this.openEditTranslationsModal());
@@ -225,24 +264,44 @@
                 });
             }
 
+            // Load the currently-selected set (triggered by "Start Learning")
             async loadFiles() {
+                await this.loadSet(this.currentSet);
+            }
+
+            // Switch to another set from the dropdown, keeping each set's progress separate
+            async switchSet(setId) {
+                const set = this.sets.find(s => s.id === setId);
+                if (!set) {
+                    return;
+                }
+                this.currentSet = set;
+                localStorage.setItem(this.CURRENT_SET_KEY, set.id);
+                await this.loadSet(set);
+            }
+
+            async loadSet(set) {
                 try {
-                    this.showLoading('Loading files...');
+                    this.showLoading('Loading ' + set.name + '...');
 
-                    // Load translations.tsv
-                    const translationsResponse = await fetch('translations.tsv');
-                    const translationsContent = await translationsResponse.text();
-                    this.data.translations = this.parseTSV(translationsContent);
+                    // Load this set's word list (Greek -> Russian / prompt)
+                    const response = await fetch(set.file);
+                    const content = await response.text();
+                    this.data.translations = this.parseTSV(content);
 
-                    // Load word weights from cloud/localStorage
-                    this.data.wordWeights = await this.loadWordWeights();
-
-                    // Initialize weights for any new words not in localStorage
+                    // Load this set's saved weights, then default any new words to 1.0
+                    this.data.wordWeights = await this.loadWordWeights(set.id);
                     for (const greekWord of this.data.translations.keys()) {
                         if (!this.data.wordWeights.has(greekWord)) {
                             this.data.wordWeights.set(greekWord, this.DEFAULT_WEIGHT);
                         }
                     }
+
+                    // Fresh session for the newly loaded set
+                    this.data.currentWord = null;
+                    this.data.previousWord = null;
+                    this.data.sessionStats = { correct: 0, wrong: 0, total: 0 };
+                    this.state.answerRevealed = false;
 
                     this.hideLoading();
                     this.showLearningScreen();
@@ -253,14 +312,14 @@
                     document.getElementById('editTranslationsBtn').disabled = false;
                     document.getElementById('manageProgressBtn').disabled = false;
 
-                    console.log('Files loaded successfully!');
+                    console.log(`Loaded set "${set.name}" (${set.file})`);
                     console.log('Total words:', this.data.wordWeights.size);
                     console.log('Translations:', this.data.translations.size);
 
                 } catch (e) {
                     this.hideLoading();
-                    console.error('Error loading files:', e);
-                    alert('Error loading files: ' + e.message + '\n\nMake sure to run this app from http://localhost:8765');
+                    console.error('Error loading set:', e);
+                    alert('Error loading "' + set.name + '": ' + e.message + '\n\nMake sure to run this app from a local/hosted server.');
                 }
             }
 
@@ -270,29 +329,42 @@
 
                 for (const line of lines) {
                     if (!line.trim()) continue;
+                    if (line.trimStart().startsWith('#')) continue; // comment/section marker
 
                     const parts = line.split('\t');
                     if (parts.length >= 2) {
                         const greek = parts[0].trim();
                         const russian = parts[1].trim();
-                        if (greek && russian) {
-                            map.set(greek, russian);
-                        }
+                        if (!greek || !russian) continue;
+                        if (greek === 'Greek' && russian === 'Russian') continue; // header row
+                        map.set(greek, russian);
                     }
                 }
 
                 return map;
             }
 
-            async loadWordWeights() {
+            async loadWordWeights(setId) {
+                const storageKey = this.weightsStorageKey(setId);
+
+                // One-time migration: the pre-multi-set app stored the "all" set
+                // under the un-namespaced key. Move it to the new key once.
+                if (setId === 'all' && !localStorage.getItem(storageKey)) {
+                    const legacy = localStorage.getItem('greekVocab_weights');
+                    if (legacy) {
+                        localStorage.setItem(storageKey, legacy);
+                        localStorage.removeItem('greekVocab_weights');
+                    }
+                }
+
                 // Try to load from cloud first
                 try {
-                    const response = await fetch('/api/weights');
+                    const response = await fetch('/api/weights?set=' + encodeURIComponent(setId));
                     if (response.ok) {
                         const data = await response.json();
                         if (data && data.length > 0) {
-                            // Save to localStorage as cache
-                            localStorage.setItem('greekVocab_weights', JSON.stringify(data));
+                            // Cache in localStorage
+                            localStorage.setItem(storageKey, JSON.stringify(data));
                             console.log('Loaded weights from cloud:', data.length);
                             return new Map(data);
                         }
@@ -303,7 +375,7 @@
 
                 // Fall back to localStorage
                 try {
-                    const stored = localStorage.getItem('greekVocab_weights');
+                    const stored = localStorage.getItem(storageKey);
                     if (!stored) {
                         return new Map();
                     }
@@ -317,12 +389,13 @@
             }
 
             saveWordWeights() {
+                const setId = this.currentSet.id;
                 try {
                     const data = Array.from(this.data.wordWeights.entries());
-                    localStorage.setItem('greekVocab_weights', JSON.stringify(data));
+                    localStorage.setItem(this.weightsStorageKey(setId), JSON.stringify(data));
 
                     // Sync to cloud (fire and forget)
-                    fetch('/api/weights', {
+                    fetch('/api/weights?set=' + encodeURIComponent(setId), {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(data),
@@ -407,8 +480,16 @@
                 }
 
                 this.state.answerRevealed = true;
-                document.getElementById('greekWord').textContent = this.data.currentWord;
-                document.getElementById('greekWord').classList.remove('hidden');
+                const greekEl = document.getElementById('greekWord');
+                // Some verbs (e.g. είμαι) show a full paradigm: " | " separates the lines.
+                if (this.data.currentWord.includes('|')) {
+                    greekEl.textContent = this.data.currentWord.split('|').map(s => s.trim()).join('\n');
+                    greekEl.classList.add('multiline');
+                } else {
+                    greekEl.textContent = this.data.currentWord;
+                    greekEl.classList.remove('multiline');
+                }
+                greekEl.classList.remove('hidden');
                 document.getElementById('actionButtons').classList.remove('hidden');
             }
 
@@ -556,8 +637,8 @@
                     return;
                 }
 
-                // Clear localStorage
-                localStorage.removeItem('greekVocab_weights');
+                // Clear this set's saved weights
+                localStorage.removeItem(this.weightsStorageKey(this.currentSet.id));
 
                 // Reset all weights to default
                 for (const greek of this.data.wordWeights.keys()) {
