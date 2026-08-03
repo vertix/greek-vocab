@@ -1,5 +1,6 @@
 [
     { "id": "all", "name": "All words", "file": "translations.tsv" },
     { "id": "units", "name": "Textbook Units 1–6", "file": "new_vocab_units1-6.tsv" },
-    { "id": "verbs", "name": "Verbs → Aorist", "file": "verbs_aorist.tsv" }
+    { "id": "verbs", "name": "Verbs → Aorist (irregular)", "file": "verbs_aorist.tsv" },
+    { "id": "verbs-regular", "name": "Verbs → Aorist (regular)", "file": "verbs_aorist_regular.tsv" }
 ]
