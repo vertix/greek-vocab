@@ -291,6 +291,7 @@
 
                     // Load this set's saved weights, then default any new words to 1.0
                     this.data.wordWeights = await this.loadWordWeights(set.id);
+                    this.migrateStaleWeightKeys();
                     for (const greekWord of this.data.translations.keys()) {
                         if (!this.data.wordWeights.has(greekWord)) {
                             this.data.wordWeights.set(greekWord, this.DEFAULT_WEIGHT);
@@ -388,6 +389,26 @@
                 }
             }
 
+            // Saved weights are keyed by the card's Greek text, so editing a card
+            // (e.g. adding future forms to a verb) orphans its saved weight.
+            // Carry the weight over when the new card text extends the old one;
+            // drop weights for cards that no longer exist in the set.
+            migrateStaleWeightKeys() {
+                let changed = false;
+                for (const oldKey of Array.from(this.data.wordWeights.keys())) {
+                    if (this.data.translations.has(oldKey)) continue;
+                    for (const newKey of this.data.translations.keys()) {
+                        if (newKey.startsWith(oldKey) && !this.data.wordWeights.has(newKey)) {
+                            this.data.wordWeights.set(newKey, this.data.wordWeights.get(oldKey));
+                            break;
+                        }
+                    }
+                    this.data.wordWeights.delete(oldKey);
+                    changed = true;
+                }
+                if (changed) this.saveWordWeights();
+            }
+
             saveWordWeights() {
                 const setId = this.currentSet.id;
                 try {
@@ -463,8 +484,10 @@
                 const russianWord = this.data.translations.get(greekWord);
 
                 if (!russianWord) {
-                    console.error('Translation not found for:', greekWord);
-                    alert('Translation missing for: ' + greekWord);
+                    console.error('Translation not found for, dropping:', greekWord);
+                    this.data.wordWeights.delete(greekWord);
+                    this.saveWordWeights();
+                    this.showNextWord();
                     return;
                 }
 
